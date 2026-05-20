@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>RPG本格バトルミニゲーム</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #222; color: #fff; }
+        .container { max-width: 500px; margin: 20px auto; padding: 20px; border: 2px solid #555; border-radius: 10px; }
+        
+        .hp-bar-container { background: #444; width: 100%; height: 18px; border-radius: 10px; overflow: hidden; margin: 8px 0; }
+        .enemy-hp { background: #e53935; height: 100%; width: 100%; transition: width 0.1s ease; }
+        .player-hp { background: #4caf50; height: 100%; width: 100%; transition: width 0.1s ease; }
+        .player-mp { background: #2196f3; height: 100%; width: 100%; transition: width 0.1s ease; }
+        
+        .boss-theme { background: #5c0000; border-color: #ff3d00; }
+        .clear-theme { background: #1b5e20; border-color: #4caf50; }
+        .gameover-theme { background: #37474f; border-color: #78909c; }
+        
+        /* コマンドレイアウト */
+        .command-zone { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+        button { padding: 12px; font-size: 14px; cursor: pointer; font-weight: bold; border-radius: 5px; border: none; }
+        .btn-attack { background: #ff5722; color: white; }
+        .btn-heal1 { background: #00bcd4; color: white; }
+        .btn-heal2 { background: #3f51b5; color: white; }
+        .btn-item { background: #ffc107; color: black; }
+        button:disabled { background: #555 !important; color: #aaa; cursor: not-allowed; }
+        
+        /* リセットボタンのスタイル */
+        .btn-reset { background: #fff; color: #000; width: 100%; margin-top: 15px; display: none; font-size: 16px; }
+        .btn-reset:hover { background: #ddd; }
+
+        #log { margin-top: 15px; font-weight: bold; white-space: pre-wrap; line-height: 1.4; background: #111; padding: 10px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="container" id="gameWindow">
+    <h2 id="stageInfo">進行状況: 雑魚戦 (0/3)</h2>
+    
+    <h3 style="margin:0;">ENEMY : <span id="enemyName">エネミー名</span></h3>
+    <div class="hp-bar-container"><div class="enemy-hp" id="enemyHpBar"></div></div>
+    <p style="margin:2px 0 15px 0;">HP: <span id="enemyHpText">0 / 0</span></p>
+    
+    <hr style="border: 1px solid #444;">
+
+    <h3 style="margin:10px 0 0 0;">PLAYER (あなた)</h3>
+    <p style="margin: 2px 0;">HP</p>
+    <div class="hp-bar-container"><div class="player-hp" id="playerHpBar"></div></div>
+    <p style="margin:2px 0 10px 0;"><span id="playerHpText">0 / 0</span></p>
+    
+    <p style="margin: 2px 0;">MP</p>
+    <div class="hp-bar-container"><div class="player-mp" id="playerMpBar"></div></div>
+    <p style="margin:2px 0 10px 0;"><span id="playerMpText">0 / 0</span></p>
+
+    <p style="color: #ffc107; font-weight: bold; margin: 5px 0;">🎒 所持薬草: <span id="herbText">0</span> 個</p>
+    
+    <div class="command-zone">
+        <button class="btn-attack" onclick="sendAction('attack')">⚔️ 通常攻撃</button>
+        <button class="btn-heal1" onclick="sendAction('heal_small')">🪄 小回復 (MP 15)</button>
+        <button class="btn-heal2" onclick="sendAction('heal_large')">✨ 大回復 (MP 40)</button>
+        <button class="btn-item" onclick="sendAction('use_herb')">🌿 薬草を使う</button>
+    </div>
+
+    <button class="btn-reset" id="resetBtn" onclick="resetGame()">🔄 もう一度最初から遊ぶ</button>
+    
+    <div id="log">バトルコマンドを選択してください。</div>
+</div>
+
+<script>
+    const gameWindow = document.getElementById("gameWindow");
+    const stageInfo = document.getElementById("stageInfo");
+    const enemyName = document.getElementById("enemyName");
+    const enemyHpBar = document.getElementById("enemyHpBar");
+    const enemyHpText = document.getElementById("enemyHpText");
+    const playerHpBar = document.getElementById("playerHpBar");
+    const playerHpText = document.getElementById("playerHpText");
+    const playerMpBar = document.getElementById("playerMpBar");
+    const playerMpText = document.getElementById("playerMpText");
+    const herbText = document.getElementById("herbText");
+    const log = document.getElementById("log");
+    const resetBtn = document.getElementById("resetBtn"); // 🛠️ 追加
+    const buttons = document.querySelectorAll(".command-zone button");
+
+    const eventSource = new EventSource("http://localhost:8080/game-stream");
+    
+    eventSource.onmessage = function(event) {
+        const state = JSON.parse(event.data);
+        
+        // プレイヤーリソース同期
+        const pHpPct = (state.player_hp / state.player_max_hp) * 100;
+        playerHpBar.style.width = `${pHpPct}%`;
+        playerHpText.innerText = `${state.player_hp} / ${state.player_max_hp}`;
+
+        const pMpPct = (state.player_mp / state.player_max_mp) * 100;
+        playerMpBar.style.width = `${pMpPct}%`;
+        playerMpText.innerText = `${state.player_mp} / ${state.player_max_mp}`;
+        
+        herbText.innerText = state.items_left;
+
+        // ゲーム状態の分岐処理
+        if (state.enemy_type === "ZAKO") {
+            stageInfo.innerText = `進行状況: 雑魚戦 (${state.defeated} / 3)`;
+            enemyName.innerText = state.enemy_name;
+            gameWindow.className = "container";
+            resetBtn.style.display = "none"; // 🛠️ 通常時は非表示
+            setButtonsDisabled(false);
+        } else if (state.enemy_type === "BOSS") {
+            stageInfo.innerText = "🚨 警告: ボス戦！ 🚨";
+            enemyName.innerText = state.enemy_name;
+            gameWindow.className = "container boss-theme";
+            resetBtn.style.display = "none"; // 🛠️ 通常時は非表示
+            setButtonsDisabled(false);
+        } else if (state.enemy_type === "CLEAR") {
+            stageInfo.innerText = "✨ クエスト完了 ✨";
+            enemyName.innerText = "👑 GAME CLEAR!! 👑";
+            gameWindow.className = "container clear-theme";
+            resetBtn.style.display = "block"; // 🛠️ クリア時に表示
+            setButtonsDisabled(true);
+            enemyHpBar.style.width = "0%";
+            enemyHpText.innerText = "0 / 0";
+            return;
+        } else if (state.enemy_type === "GAMEOVER") {
+            stageInfo.innerText = "❌ 作戦失敗 ❌";
+            enemyName.innerText = "💀 GAME OVER 💀";
+            gameWindow.className = "container gameover-theme";
+            resetBtn.style.display = "block"; // 🛠️ ゲームオーバー時に表示
+            setButtonsDisabled(true);
+            return;
+        }
+
+        const enemyHpPercent = (state.current_hp / state.max_hp) * 100;
+        enemyHpBar.style.width = `${enemyHpPercent}%`;
+        enemyHpText.innerText = `${state.current_hp} / ${state.max_hp}`;
+    };
+
+    function setButtonsDisabled(disabled) {
+        buttons.forEach(btn => btn.disabled = disabled);
+    }
+
+    // 各アクションをPOSTで送信
+    async function sendAction(actionType) {
+        setButtonsDisabled(true);
+        try {
+            const formData = new FormData();
+            formData.append('action', actionType);
+
+            const res = await fetch("game.php", { method: "POST", body: formData });
+            const data = await res.json();
+            
+            if (data.status === "error") {
+                log.innerHTML = `<span style="color: #ff8a80;">${data.message}</span>`;
+            } else {
+                log.innerText = data.log;
+            }
+        } catch (e) {
+            log.innerText = "通信エラー";
+        }
+        
+        // 入力インターバル
+        setTimeout(() => {
+            if (!gameWindow.className.includes("clear-theme") && !gameWindow.className.includes("gameover-theme")) {
+                setButtonsDisabled(false);
+            }
+        }, 400);
+    }
+
+    // 🛠️ ゲームを初期状態にリセットする関数を追加
+    async function resetGame() {
+        try {
+            await fetch("http://localhost:8080/reset", { method: "POST" });
+            log.innerText = "バトルコマンドを選択してください。";
+        } catch (e) {
+            log.innerText = "リセット通信に失敗しました。";
+        }
+    }
+</script>
+</body>
+</html>
